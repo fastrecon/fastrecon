@@ -1,0 +1,92 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fastrecon"
+version = "0.9.3"
+description = "High-performance reconciliation engine for SQL, CSV, TSV, PSV, Parquet, JSON, XML, Excel, Avro, ORC, fixed-width, and EBCDIC mainframe files — powered by DuckDB, Polars, and Arrow."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "fastrecon contributors" }]
+keywords = ["reconciliation", "data-quality", "duckdb", "polars", "arrow", "etl", "diff"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Database",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = [
+    "duckdb>=1.0.0",
+    "polars>=1.0.0",
+    "pyarrow>=16.0.0",
+    "sqlalchemy>=2.0.0",
+    "pydantic>=2.0.0",
+    "tenacity>=8.0.0",
+    "rich>=13.0.0",
+    "orjson>=3.0.0",
+    "typer>=0.12",
+]
+
+[project.optional-dependencies]
+# --- Operational databases (SQLAlchemy dialects) ---
+postgres = ["psycopg[binary]>=3.1"]
+mysql = ["pymysql>=1.1"]
+mariadb = ["pymysql>=1.1"]                          # MariaDB speaks the MySQL wire protocol
+mssql = ["pyodbc>=5.0"]
+odbc = ["pyodbc>=5.0", "pandas>=2.0"]
+jdbc = ["jaydebeapi>=1.2", "JPype1>=1.4", "pandas>=2.0"]
+oracle = ["oracledb>=2.0"]
+sqlite = []                                          # built into Python's stdlib
+# --- Cloud data warehouses ---
+snowflake = ["snowflake-sqlalchemy>=1.6"]
+redshift = ["sqlalchemy-redshift>=0.8", "redshift-connector>=2.1"]
+bigquery = ["sqlalchemy-bigquery>=1.11"]
+databricks = ["databricks-sqlalchemy>=1.0"]
+hana = ["sqlalchemy-hana>=2.0"]
+teradata = ["teradatasqlalchemy>=20.0"]
+# --- File-format-specific deps (most files work with the core install) ---
+excel = []                                           # via DuckDB's bundled excel extension
+xml = ["lxml>=4.9"]
+avro = ["fastavro>=1.9"]
+orc = []                                             # via pyarrow.orc (already a core dep)
+mainframe = []                                       # pure-python EBCDIC + COMP-3 decoder
+all-files = ["lxml>=4.9", "fastavro>=1.9"]
+# --- Convenience meta-extras ---
+all-databases = [
+    "psycopg[binary]>=3.1", "pymysql>=1.1", "pyodbc>=5.0", "oracledb>=2.0",
+    "snowflake-sqlalchemy>=1.6",
+    "sqlalchemy-redshift>=0.8", "redshift-connector>=2.1",
+    "sqlalchemy-bigquery>=1.11",
+    "databricks-sqlalchemy>=1.0",
+    "sqlalchemy-hana>=2.0",
+    "teradatasqlalchemy>=20.0",
+]
+test = ["pytest>=8.0.0", "openpyxl>=3.1"]
+docs = ["mkdocs>=1.6", "mkdocs-material>=9.5"]
+
+[project.scripts]
+fastrecon = "fastrecon.cli:main"
+
+[project.urls]
+Homepage = "https://www.fastrecon.net/"
+Documentation = "https://www.fastrecon.net/"
+Source = "https://github.com/yourname/fastrecon"
+Issues = "https://github.com/yourname/fastrecon/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fastrecon"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/fastrecon", "README.md", "LICENSE", "examples", "benchmarks", "tests", "docs", "mkdocs.yml"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

@@ -1,0 +1,54 @@
+site_name: fastrecon
+site_description: High-performance reconciliation for SQL, files, and warehouses.
+repo_url: https://github.com/yourname/fastrecon
+docs_dir: docs
+theme:
+  name: material
+  features:
+    - content.code.copy
+    - navigation.indexes
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - toc.integrate
+  palette:
+    - scheme: default
+      primary: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Connectors:
+      - Databases: databases.md
+      - File formats: files.md
+      - Cloud storage: cloud-storage.md
+  - Reconciliation:
+      - Compare modes: compare-modes.md
+      - Configuration: configuration.md
+  - Tools:
+      - CLI reference: cli.md
+      - Recipes: recipes.md
+  - Reference:
+      - API: api-reference.md
+      - Benchmarks: benchmarks.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true

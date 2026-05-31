@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>fastrecon benchmark trends</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  <style>
+    :root {
+      --bg: #0e1116;
+      --panel: #161b22;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    header {
+      padding: 24px 32px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+    }
+    header h1 { margin: 0 0 6px; font-size: 22px; }
+    header p { margin: 0; color: var(--muted); font-size: 14px; }
+    main { padding: 24px 32px; max-width: 1400px; margin: 0 auto; }
+    .controls {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-bottom: 24px;
+      align-items: center;
+    }
+    .controls label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .controls select {
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 14px;
+      min-width: 160px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
+      gap: 20px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .card h3 {
+      margin: 0 0 4px;
+      font-size: 15px;
+      font-weight: 600;
+    }
+    .card .sub {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 12px;
+    }
+    .chart-wrap { position: relative; height: 280px; }
+    .empty {
+      padding: 48px;
+      text-align: center;
+      color: var(--muted);
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+    }
+    .legend {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .dnf-note {
+      color: #f85149;
+      font-size: 12px;
+      margin-top: 4px;
+    }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>fastrecon benchmark trends</h1>
+    <p>
+      Wall time, peak RSS, and throughput per (tool × scenario × scale), built from
+      nightly CI runs. Source: <a href="https://github.com/" id="repo-link">repo</a>.
+      DNF runs (timeout / OOM / error) are plotted as gaps with a red marker.
+    </p>
+  </header>
+  <main>
+    <div class="controls">
+      <label>Metric
+        <select id="metric">
+          <option value="elapsed_sec">Wall time (s)</option>
+          <option value="peak_rss_mb">Peak RSS (MB)</option>
+          <option value="rows_per_sec">Throughput (rows/s)</option>
+        </select>
+      </label>
+      <label>Scale
+        <select id="scale"></select>
+      </label>
+      <label>Tier
+        <select id="tier">
+          <option value="all">all</option>
+        </select>
+      </label>
+    </div>
+    <div id="charts" class="grid"></div>
+    <p id="status" class="empty" style="display:none">Loading…</p>
+  </main>
+  <script>
+    const TOOL_COLORS = {
+      fastrecon: "#58a6ff",
+      datacompy: "#f0883e",
+      "data-diff": "#56d364",
+    };
+    const fallbackColors = ["#bc8cff", "#f778ba", "#39c5cf", "#d29922"];
+
+    function colorFor(tool) {
+      if (TOOL_COLORS[tool]) return TOOL_COLORS[tool];
+      let h = 0;
+      for (let i = 0; i < tool.length; i++) h = (h * 31 + tool.charCodeAt(i)) >>> 0;
+      return fallbackColors[h % fallbackColors.length];
+    }
+
+    async function loadHistory() {
+      const idxResp = await fetch("history/index.json", { cache: "no-cache" });
+      if (!idxResp.ok) throw new Error("history/index.json not found");
+      const idx = await idxResp.json();
+      const runs = [];
+      for (const entry of idx.runs) {
+        try {
+          const r = await fetch(`history/${entry.file}`, { cache: "no-cache" });
+          if (!r.ok) continue;
+          const rows = await r.json();
+          runs.push({ ...entry, rows });
+        } catch (e) {
+          console.warn("failed to load", entry.file, e);
+        }
+      }
+      runs.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+      return { idx, runs };
+    }
+
+    function metricValue(row, key) {
+      if (row.dnf) return null;
+      if (key === "peak_rss_mb") {
+        return row.peak_rss_bytes != null ? row.peak_rss_bytes / 1e6 : null;
+      }
+      return row[key];
+    }
+
+    function buildCharts({ runs }, opts) {
+      const container = document.getElementById("charts");
+      container.innerHTML = "";
+      const filtered = opts.tier === "all" ? runs : runs.filter(r => r.tier === opts.tier);
+      if (!filtered.length) {
+        container.innerHTML = '<p class="empty">No runs match this filter.</p>';
+        return;
+      }
+      // Group: scenario -> tool -> [{x, y, dnf}]
+      const scenarios = new Map();
+      for (const run of filtered) {
+        for (const row of run.rows) {
+          if (Number(row.rows) !== Number(opts.scale)) continue;
+          const sc = row.scenario;
+          if (!scenarios.has(sc)) scenarios.set(sc, new Map());
+          const byTool = scenarios.get(sc);
+          if (!byTool.has(row.tool)) byTool.set(row.tool, []);
+          byTool.get(row.tool).push({
+            x: run.timestamp,
+            y: metricValue(row, opts.metric),
+            dnf: row.dnf || null,
+            commit: run.commit,
+          });
+        }
+      }
+      if (!scenarios.size) {
+        container.innerHTML = `<p class="empty">No data for scale ${opts.scale.toLocaleString()} rows.</p>`;
+        return;
+      }
+      const sortedScenarios = [...scenarios.keys()].sort();
+      for (const sc of sortedScenarios) {
+        const byTool = scenarios.get(sc);
+        const card = document.createElement("div");
+        card.className = "card";
+        card.innerHTML = `
+          <h3>${sc}</h3>
+          <div class="sub">${opts.scale.toLocaleString()} rows · ${opts.metric}</div>
+          <div class="chart-wrap"><canvas></canvas></div>
+        `;
+        container.appendChild(card);
+        const datasets = [];
+        let dnfCount = 0;
+        // Compute axis floor for DNF markers (drawn at the bottom of the
+        // chart so they're always visible even when the line has a gap).
+        let yMax = 0;
+        for (const points of byTool.values()) {
+          for (const p of points) if (p.y != null && p.y > yMax) yMax = p.y;
+        }
+        const dnfY = yMax > 0 ? yMax * 0.04 : 1; // small positive offset
+        for (const tool of [...byTool.keys()].sort()) {
+          const points = byTool.get(tool);
+          const color = colorFor(tool);
+          // Main line: real measurements only, with gaps where DNF.
+          datasets.push({
+            label: tool,
+            data: points.map(p => ({
+              x: p.x,
+              y: p.dnf ? null : p.y,
+              dnf: p.dnf,
+              commit: p.commit,
+            })),
+            borderColor: color,
+            backgroundColor: color,
+            spanGaps: false,
+            tension: 0.2,
+            pointRadius: 3,
+            pointStyle: "circle",
+          });
+          // DNF overlay: scatter dataset that always renders a red ✕
+          // marker pinned near the x-axis. Without this, Chart.js would
+          // skip null points entirely and the DNF would silently vanish.
+          const dnfPoints = points.filter(p => p.dnf);
+          if (dnfPoints.length) {
+            datasets.push({
+              label: `${tool} (DNF)`,
+              data: dnfPoints.map(p => ({
+                x: p.x,
+                y: dnfY,
+                dnf: p.dnf,
+                commit: p.commit,
+                tool,
+              })),
+              type: "scatter",
+              showLine: false,
+              borderColor: "#f85149",
+              backgroundColor: "#f85149",
+              pointStyle: "crossRot",
+              pointRadius: 8,
+              pointHoverRadius: 10,
+              pointBorderWidth: 2,
+            });
+          }
+          dnfCount += dnfPoints.length;
+        }
+        const canvas = card.querySelector("canvas");
+        new Chart(canvas, {
+          type: "line",
+          data: { datasets },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: "nearest", intersect: false },
+            scales: {
+              x: {
+                type: "time",
+                time: { tooltipFormat: "yyyy-MM-dd HH:mm" },
+                ticks: { color: "#8b949e" },
+                grid: { color: "rgba(139,148,158,0.1)" },
+              },
+              y: {
+                beginAtZero: true,
+                ticks: { color: "#8b949e" },
+                grid: { color: "rgba(139,148,158,0.1)" },
+              },
+            },
+            plugins: {
+              legend: {
+                labels: {
+                  color: "#c9d1d9",
+                  // Hide the auto-generated "(DNF)" entries; one shared
+                  // explainer below the chart covers them.
+                  filter: item => !/\(DNF\)$/.test(item.text),
+                },
+              },
+              tooltip: {
+                callbacks: {
+                  label: ctx => {
+                    const r = ctx.raw;
+                    if (r.dnf) {
+                      const tool = r.tool || ctx.dataset.label.replace(/ \(DNF\)$/, "");
+                      return `${tool}: DNF (${r.dnf})`;
+                    }
+                    return `${ctx.dataset.label}: ${ctx.parsed.y?.toLocaleString(undefined,{maximumFractionDigits:2})}`;
+                  },
+                  afterLabel: ctx => ctx.raw.commit ? `commit ${ctx.raw.commit.slice(0,7)}` : "",
+                },
+              },
+            },
+          },
+        });
+        if (dnfCount) {
+          const note = document.createElement("div");
+          note.className = "dnf-note";
+          note.textContent = `${dnfCount} DNF run${dnfCount === 1 ? "" : "s"} marked with red ✕`;
+          card.appendChild(note);
+        }
+      }
+    }
+
+    function uniqueScales(runs) {
+      const s = new Set();
+      for (const run of runs) for (const row of run.rows) s.add(Number(row.rows));
+      return [...s].sort((a, b) => a - b);
+    }
+    function uniqueTiers(runs) {
+      const s = new Set(runs.map(r => r.tier).filter(Boolean));
+      return [...s].sort();
+    }
+
+    (async () => {
+      const status = document.getElementById("status");
+      status.style.display = "block";
+      try {
+        const data = await loadHistory();
+        if (data.idx.repo_url) {
+          document.getElementById("repo-link").href = data.idx.repo_url;
+        }
+        const scaleSel = document.getElementById("scale");
+        const tierSel = document.getElementById("tier");
+        const metricSel = document.getElementById("metric");
+        const scales = uniqueScales(data.runs);
+        for (const s of scales) {
+          const o = document.createElement("option");
+          o.value = String(s);
+          o.textContent = `${s.toLocaleString()} rows`;
+          scaleSel.appendChild(o);
+        }
+        for (const t of uniqueTiers(data.runs)) {
+          const o = document.createElement("option");
+          o.value = t;
+          o.textContent = t;
+          tierSel.appendChild(o);
+        }
+        if (!scales.length) {
+          status.textContent = "No benchmark runs in history yet. The dashboard will populate after the first nightly job.";
+          return;
+        }
+        status.style.display = "none";
+        const render = () => buildCharts(data, {
+          metric: metricSel.value,
+          scale: Number(scaleSel.value),
+          tier: tierSel.value,
+        });
+        scaleSel.addEventListener("change", render);
+        tierSel.addEventListener("change", render);
+        metricSel.addEventListener("change", render);
+        render();
+      } catch (e) {
+        status.textContent = `Failed to load benchmark history: ${e.message}`;
+      }
+    })();
+  </script>
+</body>
+</html>
